@@ -54,8 +54,20 @@ class GRU(nn.Module):
         """
         # ==========================
         # TODO: Write your code here
+        batch_size, seq_len, input_size = inputs.shape
+        inputs = torch.swapaxes(inputs, 0, 1)
+        h_prev = hidden_states
+        all_hidden_states = torch.zeros(seq_len, batch_size, hidden_states.shape[2])
+        all_hidden_states[0] = h_prev
+        for t in range(1, seq_len):
+            r_t = F.sigmoid( torch.matmul(inputs[t], self.w_ir.T) + self.b_ir + torch.matmul(h_prev, self.w_hr.T) + self.b_hr)
+            n_t = F.tanh(    torch.matmul(inputs[t], self.w_in.T) + self.b_in + torch.mul(r_t, torch.matmul(h_prev, self.w_hn.T) + self.b_hn))
+
+            z_t = F.sigmoid(torch.matmul(inputs[t], self.w_iz.T) + self.b_iz + torch.matmul(h_prev, self.w_hz.T) + self.b_hz)
+            h_prev = (1-z_t)*n_t + z_t * h_prev
+            all_hidden_states[t] = h_prev
         # ==========================
-        pass
+        return torch.swapaxes(all_hidden_states,0,1), h_prev
 
 
 
@@ -149,8 +161,13 @@ class Encoder(nn.Module):
         """
         # ==========================
         # TODO: Write your code here
+        embeddings = torch.zeros(inputs.shape[1], inputs.shape[0], self.embedding_size)
+        for t in range(inputs.shape[1]):embeddings[t] = self.embedding(inputs[t])
+        embeddings = torch.swapaxes(embeddings,0,1)
+        inputs = self.dropout(embeddings)
+        return self.rnn(inputs, hidden_states)
         # ==========================
-        pass
+
 
     def initial_states(self, batch_size, device=None):
         if device is None:
