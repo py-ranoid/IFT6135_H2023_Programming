@@ -32,7 +32,7 @@ class GRU(nn.Module):
         for param in self.parameters():
             nn.init.uniform_(param, a=-(1/hidden_size)**0.5, b=(1/hidden_size)**0.5)
 
-  def forward(self, inputs, hidden_states):
+    def forward(self, inputs, hidden_states):
         """GRU.
         
         This is a Gated Recurrent Unit
@@ -111,11 +111,22 @@ class Attn(nn.Module):
         x_attn (`torch.FloatTensor` of shape `(batch_size, sequence_length, 1)`)
             The attention vector.
         """
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
-
+        batch_size, seq_len, hidden_size = inputs.shape
+        n_layers, batch_size, hidden_size = hidden_states.shape
+        inputs = torch.swapaxes(inputs, 0, 1)                       # seq_len * batch_size * hidden_size
+        outputs = torch.zeros((seq_len, batch_size, hidden_size))
+        for t in range(seq_len):
+            layer_t_res = torch.zeros((n_layers, batch_size, hidden_size))
+            for l in range(n_layers):
+                concat_res = torch.cat((hidden_states[l], inputs[t]), dim=1) # 1 x batch_size x 2*hidden_size -> 1 x batch_size x hidden_size
+                tanh_res   = self.tanh(self.W(concat_res))       # 1 x batch_size x hidden_size   -> 1 x batch_size x hidden_size
+                layer_t_res[l] = self.V(tanh_res)                # 1 x batch_size x hidden_size   -> seq_len x batch_size x hidden_size 
+            linsum_res  = torch.sum(layer_t_res, 0, keepdim=True)   # seq_len x batch_size x hidden_size -> 1 x batch_size x hidden_size
+        outputs = torch.swapaxes(outputs, 0, 1)                     # seq_len x batch_size x hidden_size -> batch_size x seq_len x hidden_size
+        softmaxed_outputs = self.softmax(outputs)                # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
+        outputs = torch.mul(outputs, softmaxed_outputs)             # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
+        x_attn = softmaxed_outputs.sum(axis=2)                      # batch_size x seq_len x hidden_size -> batch_size x seq_len x 1
+        return outputs, x_attn
 
 class Encoder(nn.Module):
     def __init__(
@@ -137,7 +148,7 @@ class Encoder(nn.Module):
         )
 
         self.dropout = nn.Dropout(p=dropout)
-        self.rnn = 
+        self.rnn = nn.GRU(input_size=embedding_size, hidden_size=hidden_size, bidirectional=True)
 
     def forward(self, inputs, hidden_states):
         """GRU Encoder.
@@ -194,7 +205,7 @@ class DecoderAttn(nn.Module):
         self.num_layers = num_layers
         self.dropout = nn.Dropout(p=dropout)
 
-        self.rnn = 
+        self.rnn = GRU()
         
         self.mlp_attn = Attn(hidden_size, dropout)
 
