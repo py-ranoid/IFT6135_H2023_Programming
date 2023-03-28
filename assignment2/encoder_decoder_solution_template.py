@@ -212,14 +212,14 @@ class DecoderAttn(nn.Module):
     def forward(self, inputs, hidden_states, mask=None):
         """GRU Decoder network with Soft attention
 
-        This is a Unidirectional Gated Recurrent Unit Encoder network
+        This is a Unidirectional Gated Recurrent Unit Decoder network
         Parameters
         ----------
         inputs (`torch.LongTensor` of shape `(batch_size, sequence_length, hidden_size)`)
             The input tensor containing the encoded input sequence.
 
-        hidden_states(`torch.FloatTensor` of shape `(num_layers*2, batch_size, hidden_size)`)
-            The (initial) hidden state for the bidrectional GRU.
+        hidden_states(`torch.FloatTensor` of shape `(num_layers, batch_size, hidden_size)`)
+            The (initial) hidden state for the unidrectional GRU.
 
         mask ( optional `torch.LongTensor` of shape `(batch_size, sequence_length)`)
             The masked tensor containing the location of padding in the sequences.
