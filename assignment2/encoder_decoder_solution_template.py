@@ -121,7 +121,7 @@ class Attn(nn.Module):
                 concat_res = torch.cat((hidden_states[l], inputs[t]), dim=1) # 1 x batch_size x 2*hidden_size -> 1 x batch_size x hidden_size
                 tanh_res   = self.tanh(self.W(concat_res))       # 1 x batch_size x hidden_size   -> 1 x batch_size x hidden_size
                 layer_t_res[l] = self.V(tanh_res)                # 1 x batch_size x hidden_size   -> seq_len x batch_size x hidden_size 
-            linsum_res  = torch.sum(layer_t_res, 0, keepdim=True)   # seq_len x batch_size x hidden_size -> 1 x batch_size x hidden_size
+            outputs[t]  = torch.sum(layer_t_res, 0, keepdim=True)   # seq_len x batch_size x hidden_size -> 1 x batch_size x hidden_size
         outputs = torch.swapaxes(outputs, 0, 1)                     # seq_len x batch_size x hidden_size -> batch_size x seq_len x hidden_size
         softmaxed_outputs = self.softmax(outputs)                # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
         outputs = torch.mul(outputs, softmaxed_outputs)             # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
@@ -148,7 +148,7 @@ class Encoder(nn.Module):
         )
 
         self.dropout = nn.Dropout(p=dropout)
-        self.rnn = nn.GRU(input_size=embedding_size, hidden_size=hidden_size, bidirectional=True)
+        self.rnn = nn.GRU(input_size=embedding_size, num_layers = num_layers, hidden_size=hidden_size, bidirectional=True)
 
     def forward(self, inputs, hidden_states):
         """GRU Encoder.
