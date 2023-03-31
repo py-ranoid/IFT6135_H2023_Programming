@@ -52,22 +52,18 @@ class GRU(nn.Module):
         hidden_states (`torch.FloatTensor` of shape `(1, batch_size, hidden_size)`)
           The final hidden state. 
         """
-        # ==========================
-        # TODO: Write your code here
-        batch_size, seq_len, input_size = inputs.shape
-        inputs = torch.swapaxes(inputs, 0, 1)
+        batch_size, seq_len, _ = inputs.shape
+        inputs = torch.swapaxes(inputs, 1, 0)
         h_prev = hidden_states
         all_hidden_states = torch.zeros(seq_len, batch_size, hidden_states.shape[2])
-        all_hidden_states[0] = h_prev
-        for t in range(1, seq_len):
-            r_t = F.sigmoid( torch.matmul(inputs[t], self.w_ir.T) + self.b_ir + torch.matmul(h_prev, self.w_hr.T) + self.b_hr)
-            n_t = F.tanh(    torch.matmul(inputs[t], self.w_in.T) + self.b_in + torch.mul(r_t, torch.matmul(h_prev, self.w_hn.T) + self.b_hn))
-
-            z_t = F.sigmoid(torch.matmul(inputs[t], self.w_iz.T) + self.b_iz + torch.matmul(h_prev, self.w_hz.T) + self.b_hz)
-            h_prev = (1-z_t)*n_t + z_t * h_prev
+        for t in range(seq_len):
+            r_t = F.sigmoid(inputs[t] @ self.w_ir.T + self.b_ir + h_prev @ self.w_hr.T + self.b_hr)
+            z_t = F.sigmoid(inputs[t] @ self.w_iz.T + self.b_iz + h_prev @ self.w_hz.T + self.b_hz)
+            n_t = F.tanh(   inputs[t] @ self.w_in.T + self.b_in + torch.mul(r_t, h_prev @ self.w_hn.T + self.b_hn))
+            h_prev = torch.mul(1-z_t, n_t) + torch.mul(z_t, h_prev)
             all_hidden_states[t] = h_prev
         # ==========================
-        return torch.swapaxes(all_hidden_states,0,1), h_prev
+        return torch.swapaxes(all_hidden_states, 1, 0), h_prev
 
 
 
@@ -148,7 +144,7 @@ class Encoder(nn.Module):
         )
 
         self.dropout = nn.Dropout(p=dropout)
-        self.rnn = nn.GRU(input_size=embedding_size, num_layers = num_layers, hidden_size=hidden_size, bidirectional=True)
+        self.rnn = nn.GRU(input_size=embedding_size, num_layers = num_layers, hidden_size=hidden_size, bidirectional=True, batch_first=True)
 
     def forward(self, inputs, hidden_states):
         """GRU Encoder.
@@ -156,10 +152,10 @@ class Encoder(nn.Module):
         This is a Bidirectional Gated Recurrent Unit Encoder network
         Parameters
         ----------
-        inputs (`torch.FloatTensor` of shape `(batch_size, sequence_length)`)
+        inputs (`torch.FloatTensor` of shape `(batch_size 5, sequence_length 256)`)
             The input tensor containing the token sequences.
 
-        hidden_states(`torch.FloatTensor` of shape `(num_layers*2, batch_size, hidden_size)`)
+        hidden_states(`torch.FloatTensor` of shape `(num_layers*2 2, batch_size 5, hidden_size 128)`)
             The (initial) hidden state for the bidrectional GRU.
             
         Returns
@@ -170,14 +166,16 @@ class Encoder(nn.Module):
         hidden_states (`torch.FloatTensor` of shape `(num_layers, batch_size, hidden_size)`)
             The final hidden state. 
         """
-        # ==========================
-        # TODO: Write your code here
-        embeddings = torch.zeros(inputs.shape[1], inputs.shape[0], self.embedding_size)
-        for t in range(inputs.shape[1]):embeddings[t] = self.embedding(inputs[t])
+        inputs = torch.swapaxes(inputs,0,1)
+        embeddings = torch.zeros(inputs.shape[0], inputs.shape[1], self.embedding_size)
+        for t in range(inputs.shape[0]):
+            embeddings[t] = self.embedding(inputs[t])
         embeddings = torch.swapaxes(embeddings,0,1)
-        inputs = self.dropout(embeddings)
-        return self.rnn(inputs, hidden_states)
-        # ==========================
+        embeddings = self.dropout(embeddings)
+        rnn_res = self.rnn(embeddings, hidden_states)
+        outputs = rnn_res[0][:,:,:128] + rnn_res[0][:,:,128:]
+        hidden = torch.unsqueeze(rnn_res[1][0] + rnn_res[1][1], 0)
+        return outputs, hidden
 
 
     def initial_states(self, batch_size, device=None):
