@@ -35,9 +35,9 @@ class LayerNorm(nn.Module):
             The output tensor, having the same shape as `inputs`.
         """
         assert inputs.shape[-1] == self.hidden_size
-        mu    = 1/self.hidden_size * torch.sum(inputs, dim=tuple((range(len(inputs.shape)-1))), keepdim=True)
-        sigma = torch.sqrt(1/self.hidden_size * torch.sum(torch.square(inputs-mu), dim=tuple(range(len(inputs.shape)-1)), keepdim=True) + self.eps)
-        norm_inputs = torch.div((inputs - mu), sigma)
+        mu    = torch.mean(inputs, dim=-1, keepdim=True)
+        sigma = torch.sqrt(torch.var(inputs, dim=-1, keepdim=True, unbiased=False) + self.eps)
+        norm_inputs = (inputs - mu) / sigma
         output = norm_inputs * self.weight + self.bias
         return output
 
