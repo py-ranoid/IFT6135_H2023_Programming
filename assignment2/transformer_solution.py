@@ -374,21 +374,22 @@ class Transformer(nn.Module):
         """
         # Preprocess input
         
-        x = self.embedding(x)
-        B, T, _ = x.shape
+        try:
+            x = self.embedding(x)
+            B, T, _ = x.shape
 
-        # Add CLS token and positional encoding
-        cls_token = self.cls_token.repeat(B, 1, 1)
-        x = torch.cat([cls_token, x], dim=1)
-        x = x + self.pos_embedding[:,:T+1]
-        #Add dropout and then the transformer
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        
-        #Take the cls token representation and send it to mlp_head
- 
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+            # Add CLS token and positional encoding
+            cls_token = self.cls_token.repeat(B, 1, 1)
+            x = torch.cat([cls_token, x], dim=1)
+            x = x + self.pos_embedding[:,:T+1]
+            #Add dropout and then the transformer
+            x = self.dropout(x)
+            for trans_layer in self.transformer:
+                x = trans_layer.forward(x)
+            
+            #Take the cls token representation and send it to mlp_head
+            cls_mlp = self.mlp_head(x[:,0])
+        except:
+            traceback.print_exc()
+        return cls_mlp
+
