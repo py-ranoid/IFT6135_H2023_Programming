@@ -52,10 +52,12 @@ class MultiHeadedAttention(nn.Module):
         self.head_size = head_size
         self.num_heads = num_heads
         self.sequence_length = sequence_length
+        
+        self.Q = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
+        self.K = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
+        self.V = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
+        self.Y = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
 
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
 
     def get_attention_weights(self, queries, keys, mask=None):
         """Compute the attention weights.
@@ -238,10 +240,12 @@ class MultiHeadedAttention(nn.Module):
             Tensor containing the output of multi-headed attention for all the
             sequences in the batch, and all positions in each sequence.
         """
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        Q = self.Q(hidden_states)
+        K = self.K(hidden_states)
+        V = self.V(hidden_states)
+        attn_output = self.apply_attention(queries=self.split_heads(Q), keys=self.split_heads(K), values=self.split_heads(V), mask=mask)
+        outputs = self.Y(attn_output)
+        return outputs
 
 class PostNormAttentionBlock(nn.Module):
     
@@ -310,10 +314,10 @@ class PreNormAttentionBlock(nn.Module):
         
         
     def forward(self, x, mask=None):
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        post_attn_x = x + self.attn(self.layer_norm_1(x), mask)
+        linear_out = self.linear(self.layer_norm_2(post_attn_x))
+        outputs = linear_out + post_attn_x
+        return outputs
 
 
 class Transformer(nn.Module):
