@@ -180,7 +180,7 @@ class Encoder(nn.Module):
         embeddings = torch.swapaxes(embeddings,0,1)
         embeddings = self.dropout(embeddings)
         rnn_res = self.rnn(embeddings, hidden_states)
-        outputs = rnn_res[0][:,:,:128] + rnn_res[0][:,:,128:]
+        outputs = rnn_res[0][:,:,:self.hidden_size] + rnn_res[0][:,:,self.hidden_size:]
         hidden = torch.unsqueeze(rnn_res[1][0] + rnn_res[1][1], 0)
         return outputs, hidden
 
