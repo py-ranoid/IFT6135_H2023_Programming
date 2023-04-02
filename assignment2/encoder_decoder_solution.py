@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import traceback
 
 
 class GRU(nn.Module):
@@ -107,22 +108,29 @@ class Attn(nn.Module):
         x_attn (`torch.FloatTensor` of shape `(batch_size, sequence_length, 1)`)
             The attention vector.
         """
-        batch_size, seq_len, hidden_size = inputs.shape
-        n_layers, batch_size, hidden_size = hidden_states.shape
-        inputs = torch.swapaxes(inputs, 0, 1)                       # seq_len * batch_size * hidden_size
-        outputs = torch.zeros((seq_len, batch_size, hidden_size))
-        for t in range(seq_len):
-            layer_t_res = torch.zeros((n_layers, batch_size, hidden_size))
-            for l in range(n_layers):
-                concat_res = torch.cat((hidden_states[l], inputs[t]), dim=1) # 1 x batch_size x 2*hidden_size -> 1 x batch_size x hidden_size
-                tanh_res   = self.tanh(self.W(concat_res))       # 1 x batch_size x hidden_size   -> 1 x batch_size x hidden_size
-                layer_t_res[l] = self.V(tanh_res)                # 1 x batch_size x hidden_size   -> seq_len x batch_size x hidden_size 
-            outputs[t]  = torch.sum(layer_t_res, 0, keepdim=True)   # seq_len x batch_size x hidden_size -> 1 x batch_size x hidden_size
-        outputs = torch.swapaxes(outputs, 0, 1)                     # seq_len x batch_size x hidden_size -> batch_size x seq_len x hidden_size
-        softmaxed_outputs = self.softmax(outputs)                # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
-        outputs = torch.mul(outputs, softmaxed_outputs)             # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
-        x_attn = softmaxed_outputs.sum(axis=2)                      # batch_size x seq_len x hidden_size -> batch_size x seq_len x 1
-        return outputs, x_attn
+        try:
+            batch_size, seq_len, _ = inputs.shape
+            n_layers, batch_size, _ = hidden_states.shape
+            inputs = torch.swapaxes(inputs, 1, 0)                       # seq_len * batch_size * hidden_size
+            outputs = torch.zeros((seq_len, batch_size, 1))
+            for t in range(seq_len):
+                layer_t_res = torch.zeros((n_layers, batch_size, self.hidden_size))
+                for l in range(n_layers):
+                    concat_res = torch.cat((inputs[t], hidden_states[l]), dim=1) # 1 x batch_size x 2*hidden_size -> 1 x batch_size x hidden_size
+                    tanh_res   = self.tanh(self.W(concat_res))                  # 1 x batch_size x hidden_size   -> 1 x batch_size x hidden_size
+                    layer_t_res[l] = self.V(tanh_res)                # 1 x batch_size x hidden_size   -> seq_len x batch_size x hidden_size 
+                outputs[t]  = torch.sum(layer_t_res, 2, keepdim=True)   # seq_len x batch_size x hidden_size -> 1 x batch_size x hidden_size
+            outputs = torch.swapaxes(outputs, 1, 0)                     # seq_len x batch_size x hidden_size -> batch_size x seq_len x hidden_size
+            softmaxed_outputs = self.softmax(outputs)                     # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
+            res = torch.mul(softmaxed_outputs, torch.swapaxes(inputs, 1, 0))
+            if mask is not None:
+                mask = mask.unsqueeze(-1)==1
+                res = res.masked_fill_(mask, -torch.inf)
+                softmaxed_outputs = softmaxed_outputs.masked_fill_(mask, -torch.inf)
+            
+        except Exception as e: 
+            traceback.print_exc()
+        return res, softmaxed_outputs
 
 class Encoder(nn.Module):
     def __init__(
