@@ -164,11 +164,11 @@ class MultiHeadedAttention(nn.Module):
             vectors. Here `dim` is the same dimension as the one in the
             definition of the input `tensor` above.
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        batch_size, _ , concat_heads  = tensor.shape
+        dim = int(concat_heads/self.num_heads)
+        output = torch.zeros(self.num_heads, batch_size, self.sequence_length, dim)
+        for i in range(self.num_heads):output[i] = tensor[:,:,dim*i:dim*(i+1)]
+        return torch.swapaxes(output, 0, 1)
         
     def merge_heads(self, tensor):
         """Merge the head vectors.
@@ -193,10 +193,13 @@ class MultiHeadedAttention(nn.Module):
             definition of the input `tensor` above.
         """
 
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        batch_size, _ , _ , dim   = tensor.shape
+        output = torch.zeros(batch_size, self.sequence_length, self.num_heads * dim)
+        head_outs = []
+        for i in range(self.num_heads):
+            head_outs.append(torch.squeeze(tensor[:,i],dim=1))
+        output = torch.cat(head_outs,dim=2)
+        return output
 
     def forward(self, hidden_states, mask=None):
         """Multi-headed attention.
