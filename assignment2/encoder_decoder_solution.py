@@ -203,7 +203,7 @@ class DecoderAttn(nn.Module):
         self.num_layers = num_layers
         self.dropout = nn.Dropout(p=dropout)
 
-        self.rnn = GRU()
+        self.rnn = nn.GRU(embedding_size, hidden_size, num_layers=self.num_layers, batch_first=True)
         
         self.mlp_attn = Attn(hidden_size, dropout)
 
@@ -230,10 +230,9 @@ class DecoderAttn(nn.Module):
         hidden_states (`torch.FloatTensor` of shape `(num_layers, batch_size, hidden_size)`)
             The final hidden state. 
         """
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        attn_out, _ = self.mlp_attn.forward(inputs=inputs, hidden_states=hidden_states, mask=mask)                
+        gru_out, gru_hid = self.rnn(attn_out, hidden_states)
+        return gru_out, gru_hid
         
         
 class EncoderDecoder(nn.Module):
