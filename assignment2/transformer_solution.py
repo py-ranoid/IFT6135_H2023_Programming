@@ -89,10 +89,13 @@ class MultiHeadedAttention(nn.Module):
             Tensor containing the attention weights for all the heads and all
             the sequences in the batch.
         """
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        head_size = torch.tensor(self.head_size).float()
+        scores = queries @ keys.transpose(2,3)/torch.sqrt(head_size)
+        if mask is not None:            
+            mask = torch.unsqueeze(torch.unsqueeze(mask,dim=1),dim=1)
+            scores = scores.masked_fill_(mask==0, -torch.inf)
+        weights = torch.softmax(scores, dim=-1)
+        return weights
         
     def apply_attention(self, queries, keys, values, mask=None):
         """Apply the attention.
@@ -135,11 +138,10 @@ class MultiHeadedAttention(nn.Module):
             Tensor containing the concatenated outputs of the attention for all
             the sequences in the batch, and all positions in each sequence. 
         """
-
-        # ==========================
-        # TODO: Write your code here
-        # ==========================
-        pass
+        weights = self.get_attention_weights(queries, keys, mask=mask)
+        post_attn_vals = weights @ values
+        merged_vals = self.merge_heads(post_attn_vals)
+        return merged_vals
 
     def split_heads(self, tensor):
         """Split the head vectors.
