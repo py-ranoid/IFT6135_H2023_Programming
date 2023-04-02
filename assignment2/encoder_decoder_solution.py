@@ -121,14 +121,13 @@ class Attn(nn.Module):
                     layer_t_res[l] = self.V(tanh_res)                # 1 x batch_size x hidden_size   -> seq_len x batch_size x hidden_size 
                 outputs[t]  = torch.sum(layer_t_res, 2, keepdim=True)   # seq_len x batch_size x hidden_size -> 1 x batch_size x hidden_size
             outputs = torch.swapaxes(outputs, 1, 0)                     # seq_len x batch_size x hidden_size -> batch_size x seq_len x hidden_size
+            if mask is not None:
+                mask = mask.unsqueeze(-1)
+                outputs = outputs.masked_fill_(mask==0, -torch.inf)
+            
             softmaxed_outputs = self.softmax(outputs)                     # batch_size x seq_len x hidden_size -> batch_size x seq_len x hidden_size
             res = torch.mul(softmaxed_outputs, torch.swapaxes(inputs, 1, 0))
-            if mask is not None:
-                mask = mask.unsqueeze(-1)==1
-                res = res.masked_fill_(mask, -torch.inf)
-                softmaxed_outputs = softmaxed_outputs.masked_fill_(mask, -torch.inf)
-            
-        except Exception as e: 
+        except: 
             traceback.print_exc()
         return res, softmaxed_outputs
 
