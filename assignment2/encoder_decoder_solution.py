@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import traceback
-
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class GRU(nn.Module):
     def __init__(
@@ -15,21 +15,21 @@ class GRU(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        self.w_ir = nn.Parameter(torch.empty(hidden_size, input_size))
-        self.w_iz = nn.Parameter(torch.empty(hidden_size, input_size))
-        self.w_in = nn.Parameter(torch.empty(hidden_size, input_size))
+        self.w_ir = nn.Parameter(torch.empty(hidden_size, input_size, device=device))
+        self.w_iz = nn.Parameter(torch.empty(hidden_size, input_size, device=device))
+        self.w_in = nn.Parameter(torch.empty(hidden_size, input_size, device=device))
 
-        self.b_ir = nn.Parameter(torch.empty(hidden_size))
-        self.b_iz = nn.Parameter(torch.empty(hidden_size))
-        self.b_in = nn.Parameter(torch.empty(hidden_size))
+        self.b_ir = nn.Parameter(torch.empty(hidden_size, device=device))
+        self.b_iz = nn.Parameter(torch.empty(hidden_size, device=device))
+        self.b_in = nn.Parameter(torch.empty(hidden_size, device=device))
 
-        self.w_hr = nn.Parameter(torch.empty(hidden_size, hidden_size))
-        self.w_hz = nn.Parameter(torch.empty(hidden_size, hidden_size))
-        self.w_hn = nn.Parameter(torch.empty(hidden_size, hidden_size))
+        self.w_hr = nn.Parameter(torch.empty(hidden_size, hidden_size, device=device))
+        self.w_hz = nn.Parameter(torch.empty(hidden_size, hidden_size, device=device))
+        self.w_hn = nn.Parameter(torch.empty(hidden_size, hidden_size, device=device))
 
-        self.b_hr = nn.Parameter(torch.empty(hidden_size))
-        self.b_hz = nn.Parameter(torch.empty(hidden_size))
-        self.b_hn = nn.Parameter(torch.empty(hidden_size))
+        self.b_hr = nn.Parameter(torch.empty(hidden_size, device=device))
+        self.b_hz = nn.Parameter(torch.empty(hidden_size, device=device))
+        self.b_hn = nn.Parameter(torch.empty(hidden_size, device=device))
         for param in self.parameters():
             nn.init.uniform_(param, a=-(1/hidden_size)**0.5, b=(1/hidden_size)**0.5)
 
@@ -56,7 +56,7 @@ class GRU(nn.Module):
         batch_size, seq_len, _ = inputs.shape
         inputs = torch.swapaxes(inputs, 1, 0)
         h_prev = hidden_states
-        all_hidden_states = torch.zeros(seq_len, batch_size, hidden_states.shape[2])
+        all_hidden_states = torch.zeros(seq_len, batch_size, hidden_states.shape[2], device=device)
         for t in range(seq_len):
             r_t = F.sigmoid(inputs[t] @ self.w_ir.T + self.b_ir + h_prev @ self.w_hr.T + self.b_hr)
             z_t = F.sigmoid(inputs[t] @ self.w_iz.T + self.b_iz + h_prev @ self.w_hz.T + self.b_hz)
@@ -77,8 +77,8 @@ class Attn(nn.Module):
         super(Attn, self).__init__()
         self.hidden_size = hidden_size
 
-        self.W = nn.Linear(hidden_size*2, hidden_size)
-        self.V = nn.Linear(hidden_size, hidden_size) # in the forwards, after multiplying
+        self.W = nn.Linear(hidden_size*2, hidden_size, device=device)
+        self.V = nn.Linear(hidden_size, hidden_size, device=device) # in the forwards, after multiplying
                                                      # do a torch.sum(..., keepdim=True), its a linear operation
 
         self.tanh = nn.Tanh()
@@ -112,9 +112,9 @@ class Attn(nn.Module):
             batch_size, seq_len, _ = inputs.shape
             n_layers, batch_size, _ = hidden_states.shape
             inputs = torch.swapaxes(inputs, 1, 0)                       # seq_len * batch_size * hidden_size
-            outputs = torch.zeros((seq_len, batch_size, 1))
+            outputs = torch.zeros((seq_len, batch_size, 1), device=device)
             for t in range(seq_len):
-                layer_t_res = torch.zeros((n_layers, batch_size, self.hidden_size))
+                layer_t_res = torch.zeros((n_layers, batch_size, self.hidden_size), device=device)
                 for l in range(n_layers):
                     concat_res = torch.cat((inputs[t], hidden_states[l]), dim=1) # 1 x batch_size x 2*hidden_size -> 1 x batch_size x hidden_size
                     tanh_res   = self.tanh(self.W(concat_res))                  # 1 x batch_size x hidden_size   -> 1 x batch_size x hidden_size
@@ -147,7 +147,7 @@ class Encoder(nn.Module):
         self.num_layers = num_layers
 
         self.embedding = nn.Embedding(
-            vocabulary_size, embedding_size, padding_idx=0,
+            vocabulary_size, embedding_size, padding_idx=0, device=device
         )
 
         self.dropout = nn.Dropout(p=dropout)
@@ -174,12 +174,12 @@ class Encoder(nn.Module):
             The final hidden state. 
         """
         inputs = torch.swapaxes(inputs,0,1)
-        embeddings = torch.zeros(inputs.shape[0], inputs.shape[1], self.embedding_size)
+        embeddings = torch.zeros(inputs.shape[0], inputs.shape[1], self.embedding_size, device=device)
         for t in range(inputs.shape[0]):
             embeddings[t] = self.embedding(inputs[t])
         embeddings = torch.swapaxes(embeddings,0,1)
         embeddings = self.dropout(embeddings)
-        rnn_res = self.rnn(embeddings, hidden_states)
+        rnn_res = self.rnn(embeddings, hidden_states).to(device)
         outputs = rnn_res[0][:,:,:self.hidden_size] + rnn_res[0][:,:,self.hidden_size:]
         hidden = torch.unsqueeze(rnn_res[1][0] + rnn_res[1][1], 0)
         return outputs, hidden
@@ -238,7 +238,7 @@ class DecoderAttn(nn.Module):
             The final hidden state. 
         """
         attn_out, _ = self.mlp_attn.forward(inputs=inputs, hidden_states=hidden_states, mask=mask)                
-        gru_out, gru_hid = self.rnn(attn_out, hidden_states)
+        gru_out, gru_hid = self.rnn(attn_out, hidden_states).to(device)
         return gru_out, gru_hid
         
         
