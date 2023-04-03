@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import traceback
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class LayerNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-5):
@@ -11,8 +12,8 @@ class LayerNorm(nn.Module):
         self.hidden_size = hidden_size
         self.eps = eps
 
-        self.weight = nn.Parameter(torch.Tensor(hidden_size))
-        self.bias = nn.Parameter(torch.Tensor(hidden_size))
+        self.weight = nn.Parameter(torch.Tensor(hidden_size, device=device))
+        self.bias = nn.Parameter(torch.Tensor(hidden_size, device=device))
 
         self.reset_parameters()
 
@@ -53,10 +54,10 @@ class MultiHeadedAttention(nn.Module):
         self.num_heads = num_heads
         self.sequence_length = sequence_length
         
-        self.Q = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
-        self.K = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
-        self.V = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
-        self.Y = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True)
+        self.Q = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True, device=device)
+        self.K = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True, device=device)
+        self.V = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True, device=device)
+        self.Y = nn.Linear(in_features= num_heads * head_size, out_features= num_heads * head_size, bias=True, device=device)
 
 
     def get_attention_weights(self, queries, keys, mask=None):
@@ -91,7 +92,7 @@ class MultiHeadedAttention(nn.Module):
             Tensor containing the attention weights for all the heads and all
             the sequences in the batch.
         """
-        head_size = torch.tensor(self.head_size).float()
+        head_size = torch.tensor(self.head_size, device=device).float()
         scores = queries @ keys.transpose(2,3)/torch.sqrt(head_size)
         if mask is not None:            
             mask = torch.unsqueeze(torch.unsqueeze(mask,dim=1),dim=1)
@@ -170,7 +171,7 @@ class MultiHeadedAttention(nn.Module):
         """
         batch_size, _ , concat_heads  = tensor.shape
         dim = int(concat_heads/self.num_heads)
-        output = torch.zeros(self.num_heads, batch_size, self.sequence_length, dim)
+        output = torch.zeros(self.num_heads, batch_size, self.sequence_length, dim, device=device)
         for i in range(self.num_heads):output[i] = tensor[:,:,dim*i:dim*(i+1)]
         return torch.swapaxes(output, 0, 1)
         
@@ -198,7 +199,7 @@ class MultiHeadedAttention(nn.Module):
         """
 
         batch_size, _ , _ , dim   = tensor.shape
-        output = torch.zeros(batch_size, self.sequence_length, self.num_heads * dim)
+        output = torch.zeros(batch_size, self.sequence_length, self.num_heads * dim, device=device)
         head_outs = []
         for i in range(self.num_heads):
             head_outs.append(torch.squeeze(tensor[:,i],dim=1))
@@ -265,10 +266,10 @@ class PostNormAttentionBlock(nn.Module):
         self.attn = MultiHeadedAttention(embed_dim//num_heads, num_heads,sequence_length)
         self.layer_norm_2 = LayerNorm(embed_dim)
         self.linear = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim),
+            nn.Linear(embed_dim, hidden_dim, device=device),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, embed_dim),
+            nn.Linear(hidden_dim, embed_dim, device=device),
             nn.Dropout(dropout)
         )
         
@@ -305,10 +306,10 @@ class PreNormAttentionBlock(nn.Module):
         self.attn = MultiHeadedAttention(embed_dim//num_heads, num_heads,sequence_length)
         self.layer_norm_2 = LayerNorm(embed_dim)
         self.linear = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim),
+            nn.Linear(embed_dim, hidden_dim, device=device),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, embed_dim),
+            nn.Linear(hidden_dim, embed_dim, device=device),
             nn.Dropout(dropout)
         )
         
@@ -340,7 +341,7 @@ class Transformer(nn.Module):
         #Adding the cls token to the sequnence 
         self.sequence_length= 1 + 256
         # Layers/Networks
-        self.embedding = nn.Embedding(vocabulary_size, embed_dim)
+        self.embedding = nn.Embedding(vocabulary_size, embed_dim, device=device)
         if block =='prenorm':
           self.transformer = nn.ModuleList([PreNormAttentionBlock(embed_dim, hidden_dim, num_heads,self.sequence_length, dropout=dropout) for _ in range(num_layers)])
         else:
