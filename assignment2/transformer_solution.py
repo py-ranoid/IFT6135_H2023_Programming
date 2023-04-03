@@ -12,8 +12,8 @@ class LayerNorm(nn.Module):
         self.hidden_size = hidden_size
         self.eps = eps
 
-        self.weight = nn.Parameter(torch.Tensor(hidden_size, device=device))
-        self.bias = nn.Parameter(torch.Tensor(hidden_size, device=device))
+        self.weight = nn.Parameter(torch.Tensor(hidden_size))
+        self.bias = nn.Parameter(torch.Tensor(hidden_size))
 
         self.reset_parameters()
 
@@ -352,8 +352,8 @@ class Transformer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Parameters/Embeddings
-        self.cls_token = nn.Parameter(torch.randn(1,1,embed_dim))
-        self.pos_embedding = nn.Parameter(torch.randn(1,self.sequence_length,embed_dim))
+        self.cls_token = nn.Parameter(torch.randn(1,1,embed_dim, device=device))
+        self.pos_embedding = nn.Parameter(torch.randn(1,self.sequence_length,embed_dim, device=device))
    
     def forward(self, x, mask=None):
         """Transformer
@@ -386,7 +386,7 @@ class Transformer(nn.Module):
             #Add dropout and then the transformer
             x = self.dropout(x)
             for trans_layer in self.transformer:
-                x = trans_layer.forward(x)
+                x = trans_layer.forward(x.to(device))
             
             #Take the cls token representation and send it to mlp_head
             cls_mlp = self.mlp_head(x[:,0])

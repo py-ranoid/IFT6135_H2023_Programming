@@ -179,7 +179,7 @@ class Encoder(nn.Module):
             embeddings[t] = self.embedding(inputs[t])
         embeddings = torch.swapaxes(embeddings,0,1)
         embeddings = self.dropout(embeddings)
-        rnn_res = self.rnn(embeddings, hidden_states).to(device)
+        rnn_res = self.rnn(embeddings, hidden_states)
         outputs = rnn_res[0][:,:,:self.hidden_size] + rnn_res[0][:,:,self.hidden_size:]
         hidden = torch.unsqueeze(rnn_res[1][0] + rnn_res[1][1], 0)
         return outputs, hidden
@@ -238,7 +238,7 @@ class DecoderAttn(nn.Module):
             The final hidden state. 
         """
         attn_out, _ = self.mlp_attn.forward(inputs=inputs, hidden_states=hidden_states, mask=mask)                
-        gru_out, gru_hid = self.rnn(attn_out, hidden_states).to(device)
+        gru_out, gru_hid = self.rnn(attn_out, hidden_states)
         return gru_out, gru_hid
         
         
