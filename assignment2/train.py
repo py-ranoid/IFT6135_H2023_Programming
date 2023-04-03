@@ -27,6 +27,8 @@ tokenizer_name = "bert-base-uncased" #@param {type: "string"}
 sample_max_length = 256 #@param {type:"slider", min:32, max:512, step:1}
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.random.manual_seed(0)
+import wandb
+import random
 
 class Collate:
     def __init__(self, tokenizer: str, max_len: int) -> None:
@@ -161,7 +163,7 @@ def train_one_epoch(
             logger['eval_accs'].append(eval_acc)
             logger['eval_losses'].append(eval_loss)
             logger['eval_time'].append(eval_time+logger['eval_time'][-1])
-
+            wandb.log({metric:logger[metric][-1] for metric in logger})
             logging_loss = 0
             mini_start_time = time.time()
 
@@ -236,29 +238,55 @@ def main():
         experimental_setting = i
         # 4 experimental settings
         torch.random.manual_seed(0)
+        print("Initiating setting",experimental_setting)
 
+        #Choosing experimental setting and model
         if experimental_setting == 1:
-            model = ReviewClassifierLSTM(nb_classes=2, dropout=0.3, encoder_only=True)
-        if experimental_setting == 2:
-            model = ReviewClassifierLSTM(nb_classes=2, dropout=0.3, encoder_only=False)
-        if experimental_setting == 3:
-            model = ReviewClassifierTransformer(nb_classes=2, num_heads=4, num_layers=2, block='prenorm', dropout=0.3)
-        if experimental_setting == 4:
-            model = ReviewClassifierTransformer(nb_classes=2, num_heads=4, num_layers=4, block='prenorm', dropout=0.3)
-        if experimental_setting == 5:
-            model = ReviewClassifierTransformer(nb_classes=2, num_heads=4, num_layers=2, block='postnorm', dropout=0.3)
-        if experimental_setting == 6: 
-            model = ReviewClassifier(backbone="bert-base-uncased", backbone_hidden_size=768, nb_classes=2)
+            exp_args = dict(nb_classes=2, dropout=0.3, encoder_only=True)            
+            model = ReviewClassifierLSTM(**exp_args)
+            exp_args['model_class'] = "ReviewClassifierLSTM"
+        elif experimental_setting == 2:
+            exp_args = dict(nb_classes=2, dropout=0.3, encoder_only=False)
+            model = ReviewClassifierLSTM(**exp_args)
+            exp_args['model_class'] = "ReviewClassifierLSTM"
+        elif experimental_setting == 3:
+            exp_args = dict(nb_classes=2, num_heads=4, num_layers=2, block='prenorm', dropout=0.3)
+            model = ReviewClassifierTransformer(**exp_args)
+            exp_args['model_class'] = "ReviewClassifierTransformer"
+        elif experimental_setting == 4:
+            exp_args = dict(nb_classes=2, num_heads=4, num_layers=4, block='prenorm', dropout=0.3)
+            model = ReviewClassifierTransformer(**exp_args)
+            exp_args['model_class'] = "ReviewClassifierTransformer"
+        elif experimental_setting == 5:
+            exp_args = dict(nb_classes=2, num_heads=4, num_layers=2, block='postnorm', dropout=0.3)
+            model = ReviewClassifierTransformer(**exp_args)
+            exp_args['model_class'] = "ReviewClassifierTransformer"            
+        elif experimental_setting == 6: 
+            exp_args = dict(backbone="bert-base-uncased", backbone_hidden_size=768, nb_classes=2)
+            model = ReviewClassifier(**exp_args)
             for parameter in model.back_bone.parameters():
                 parameter.requires_grad= False
                 logging_frequency = 703
+            exp_args['model_class'] = "ReviewClassifierTransformer"
 
-        # setting up the optimizer
+        #Initialising wandb experiment
+        exp_args['experimental_setting'] = experimental_setting
+        wandb.init(project="RepLearning - A2",config=exp_args)
+
+        #Setting up the optimizer
         optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, eps=1e-8)
         model.to(device)
         logger = get_logger(model)
-        train_loss, train_time = train_one_epoch(model, train_loader, optimizer, logging_frequency, test_loader, logger)
-        eval_acc, eval_loss, eval_time  = evaluate(model, test_loader)
+        
+        #Training model for nb_epoch epochs
+        for i in range(nb_epoch):
+            train_loss, train_time = train_one_epoch(model, train_loader, optimizer, logging_frequency, test_loader, logger)
+        
+        #Evalutating model
+        eval_acc, eval_loss, eval_time = evaluate(model, test_loader)
+        print("Eval accuracy:",eval_acc,"Eval loss",eval_loss,"Eval time",eval_time)
+        
+        #Print logger values and save logs
         logger = put_in_dictionary(logger, train_loss, train_time, eval_loss, eval_time, eval_acc)
         print(f"    Epoch: {1} Loss/Test: {eval_loss}, Loss/Train: {train_loss}, Acc/Test: {eval_acc}, Train Time: {train_time}, Eval Time: {eval_time}")
         save_logs(logger, "assignment/log", str(experimental_setting))
