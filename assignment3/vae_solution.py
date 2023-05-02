@@ -2,9 +2,10 @@ import random
 import numpy as np
 import traceback
 from tqdm.auto import tqdm
-
+import wandb
 import torch
-
+import math
+torch.pi = math.pi
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -13,7 +14,7 @@ from torchvision import datasets
 from torchvision.utils import make_grid, save_image
 from torchvision import transforms
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from pathlib import Path
 
 
@@ -28,15 +29,16 @@ def fix_experiment_seed(seed=0):
 
 fix_experiment_seed()
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
+print ("Device: ", device)
 
 # Helper Functions
 def show_image(image, nrow=8):
   # Input: image
   # Displays the image using matplotlib
-  grid_img = make_grid(image.detach().cpu(), nrow=nrow, padding=0)
-  plt.imshow(grid_img.permute(1, 2, 0))
-  plt.axis('off')
+  #grid_img = make_grid(image.detach().cpu(), nrow=nrow, padding=0)
+  #plt.imshow(grid_img.permute(1, 2, 0))
+  #plt.axis('off')
+  pass
 
 
 def get_dataloaders(data_root, batch_size):
@@ -111,7 +113,7 @@ class Decoder(nn.Module):
     self.decoder_dense = nn.Sequential(
       nn.Linear(nz, ndf * 8 * self.out_size * self.out_size),
       nn.ReLU(True)
-    )
+    ).to(device)
 
     self.decoder_conv = nn.Sequential(
       nn.UpsamplingNearest2d(scale_factor=2),
@@ -128,13 +130,13 @@ class Decoder(nn.Module):
 
       nn.UpsamplingNearest2d(scale_factor=2),
       nn.Conv2d(ndf, nc, 3, 1, padding=1)
-    )
+    ).to(device)
 
   def forward(self, input):
     batch_size = input.size(0)
     hidden = self.decoder_dense(input).view(
-      batch_size, self.ndf * 8, self.out_size, self.out_size)
-    output = self.decoder_conv(hidden)
+      batch_size, self.ndf * 8, self.out_size, self.out_size).to(device)
+    output = self.decoder_conv(hidden).to(device)
     return output
 
  
@@ -147,19 +149,19 @@ class DiagonalGaussianDistribution(object):
     # logvar: Optional tensor representing the log of the standard variance
     #         for each of the dimensions of the distribution 
 
-    self.mean = mean
+    self.mean = mean.to(device)
     if logvar is None:
-        logvar = torch.zeros_like(self.mean)
+        logvar = torch.zeros_like(self.mean).to(device)
     self.logvar = torch.clamp(logvar, -30., 20.)
     self.batch_size = self.mean.size(0)
     self.latent_size = self.mean.view(self.batch_size,-1).shape[1]
-    self.std = torch.exp(0.5 * self.logvar)
-    self.var = torch.exp(self.logvar)
+    self.std = torch.exp(0.5 * self.logvar).to(device)
+    self.var = torch.exp(self.logvar).to(device)
 
   def sample(self):
     # Provide a reparameterized sample from the distribution
     # Return: Tensor of the same size as the mean
-    sample = self.mean + self.std * torch.normal(mean=torch.zeros_like(self.std), std=torch.ones_like(self.std))
+    sample = self.mean.to(device) + self.std.to(device) * torch.normal(mean=torch.zeros_like(self.std), std=torch.ones_like(self.std)).to(device)
     return sample
 
   def kl(self):
@@ -181,7 +183,7 @@ class DiagonalGaussianDistribution(object):
     negative_ll =  0.5 * (self.latent_size * torch.log(torch.tensor(torch.pi * 2))
                             + torch.sum(self.logvar, dim=dims)
                             + torch.sum((sample-self.mean)**2 / self.var, dim=dims)
-                            )
+                            ).to(device)
     return negative_ll
 
   def mode(self):
@@ -208,8 +210,8 @@ class VAE(nn.Module):
 
     # Map the encoded feature map to the latent vector of mean, (log)variance
     out_size = input_size // 16
-    self.mean = nn.Linear(encoder_features * 8 * out_size * out_size, z_dim)
-    self.logvar = nn.Linear(encoder_features * 8 * out_size * out_size, z_dim)
+    self.mean = nn.Linear(encoder_features * 8 * out_size * out_size, z_dim).to(device)
+    self.logvar = nn.Linear(encoder_features * 8 * out_size * out_size, z_dim).to(device)
 
     # Decode the Latent Representation
     self.decoder = Decoder(nc=in_channels, 
@@ -246,7 +248,7 @@ class VAE(nn.Module):
     #            Size: (batch_size, 3, 32, 32)
     try:
         _z_shape = (batch_size, self.decoder.ndf)
-        z = torch.normal(mean=torch.zeros(_z_shape), std=torch.ones(_z_shape))
+        z = torch.normal(mean=torch.zeros(_z_shape), std=torch.ones(_z_shape)).to(self.device)
         posterior_x = self.decode(z)
     except:
         traceback.print_exc()
@@ -320,7 +322,9 @@ if __name__ == '__main__':
   image_size = 32
   input_channels = 3
   data_root = '../data'
-
+  epochs = 30
+  exp_args = {"train_batch_size":train_batch_size,"z_dim":z_dim,"lr":lr,"image_size":image_size,"input_channels":input_channels,"data_root": data_root, "epochs": epochs, "device": str(device), "model": "VAE"}
+  wandb.init(project="RepLearning - A3",config=exp_args)
   model = VAE(in_channels=input_channels, 
             input_size=image_size, 
             z_dim=z_dim, 
@@ -330,11 +334,11 @@ if __name__ == '__main__':
             )
   model.to(device)
   optimizer = Adam(model.parameters(), lr=lr)
-  epochs = 30
   train_dataloader, _ = get_dataloaders(data_root, batch_size=train_batch_size)
   for epoch in range(epochs):
     with tqdm(train_dataloader, unit="batch", leave=False) as tepoch:
       model.train()
+      print("Epoch: ", epoch)
       for batch in tepoch:
         tepoch.set_description(f"Epoch: {epoch}")
 
@@ -349,7 +353,7 @@ if __name__ == '__main__':
 
         loss.backward()
         optimizer.step()
-
+        wandb.log({"loss":loss.item(), "nll":nll.mean().item(), "kl":kl.mean().item()})
         tepoch.set_postfix(loss=loss.item())
 
     samples = model.sample(batch_size=64)
@@ -381,3 +385,4 @@ if __name__ == '__main__':
 
   interp = interpolate(model, z_1, z_2, 10)
   show_image((interp + 1.) * 0.5, nrow=10)
+  wandb.finish()
