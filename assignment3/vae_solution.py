@@ -1,40 +1,3 @@
-# %% [markdown]
-# # IFT6135-A2022
-# # Assignment 3: VAE Practical
-# 
-# You must fill in your answers to various questions in this notebook, following which you must export this notebook to a Python file named `vae_solution.py` and submit it on Gradescope.
-# 
-# Only edit the functions specified in the PDF (and wherever marked – `# WRITE CODE HERE`). Do not change definitions or edit the rest of the template, else the autograder will not work.
-# 
-# **Make sure you request a GPU runtime!**
-
-# %% [markdown]
-# ## VAE Basics
-# 
-# Variational Autoencoders are generative latent-variable models that are popularly used for unsupervised learning and are aimed at maximizing the log-likelihood of the data, that is, maximizing $\sum\limits_{i=1}^N \log p(x_i; \theta)$ where $N$ is the number of data samples available. The generative story is as follows:
-# 
-# \begin{align*}
-#   z &\sim \mathcal{N}(0, I) \\
-#   x | z &\sim \mathcal{N}(\mu_\theta(z), \Sigma_\theta(z))
-# \end{align*}
-# 
-# Given $\mu_\theta(\cdot)$ and $\Sigma_\theta(\cdot)$ are parameterized as arbitrary Neural Networks, one cannot obtain the log-likelihood $\log \mathbb{E}_{z}[p(x | z, \theta)]$ in closed form and hence has to rely on variational assumptions for optimization.
-# 
-# One way of optimizing for log-likelihood is to use the variational distribution $q_\phi(z | x)$, which with a little bit of algebra leads to the ELBO, which is:
-# 
-# \begin{align*}
-#   ELBO = \sum_{i=1}^N \left( \mathbb{E}_{z\sim q_\phi(z|x_i)} [\log p_\theta(x_i | z)] + \mathbb{KL}[q_\phi(z|x_i) || \mathcal{N}(0, I)] \right)
-# \end{align*}
-# 
-# This is the objective that we use for optimizing VAEs, where different flavours of VAE can be obtained by changing either the approximate posterior $q_\phi$, the conditional likelihood distribution $p_\theta$ or even the standard normal prior.
-# 
-# The aim of this assignment would be to code a simple version of a VAE, where $q_\phi(z|x)$ will be parameterized as $\mathcal{N}(\mu_\phi(x), \Sigma_\phi(x))$ where $\mu(x)$ is a mean vector and $\Sigma(x)$ will be a **diagonal covariance matrix**, that is, it will only have non-zero entries on the diagonal.
-# 
-# The likelihood $p_\theta(x|z)$ will also be modeled as a Gaussian Distribution $\mathcal{N}(\mu_\theta(z), I)$ where we parameterize the mean with another neural network but for simplicity, consider the identity covariance matrix.
-# 
-# For details about VAEs, please refer to [Kingma's Paper](https://arxiv.org/abs/1312.6114) and the [Rezende's Paper](https://arxiv.org/abs/1401.4082)
-
-# %%
 import random
 import numpy as np
 import traceback
@@ -63,13 +26,10 @@ def fix_experiment_seed(seed=0):
   torch.backends.cudnn.deterministic = True
   torch.backends.cudnn.benchmark = False
 
-# fix_experiment_seed()
-
-results_folder = Path("./results")
-results_folder.mkdir(exist_ok = True)
+fix_experiment_seed()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# %%
+
 # Helper Functions
 def show_image(image, nrow=8):
   # Input: image
@@ -78,28 +38,7 @@ def show_image(image, nrow=8):
   plt.imshow(grid_img.permute(1, 2, 0))
   plt.axis('off')
 
-# %% [markdown]
-# ## Set up the hyperparameters
-# - Train Batch Size
-# - Latent Dimensionality
-# - Learning Rate
 
-# %%
-# Training Hyperparameters
-train_batch_size = 64   # Batch Size
-z_dim = 32        # Latent Dimensionality
-lr = 1e-4         # Learning Rate
-
-# %% [markdown]
-# ## Set up dataset, we are using SVHN dataset for this assignment.
-
-# %%
-# Define Dataset Statistics
-image_size = 32
-input_channels = 3
-data_root = '../data'
-
-# %%
 def get_dataloaders(data_root, batch_size):
     normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5],
                                      std=[0.5, 0.5, 0.5])
@@ -116,12 +55,7 @@ def get_dataloaders(data_root, batch_size):
 
     return train_dataloader, test_dataloader
 
-# %% [markdown]
-# ## Visualize the Data
-# 
-# Lets visualize what our data actually looks like! We are using the [SVHN dataset](http://ufldl.stanford.edu/housenumbers/) which comprises of images of house numbers seen from the streets.
-
-# %%
+ 
 # Visualize the Dataset
 def visualize():
   train_dataloader, _ = get_dataloaders(data_root=data_root, batch_size=train_batch_size)
@@ -130,19 +64,11 @@ def visualize():
   save_image((imgs + 1.) * 0.5, './results/orig.png')
   show_image((imgs + 1.) * 0.5)
 
-if __name__ == '__main__':
-  visualize()
+# if __name__ == '__main__':
+#   visualize()
 
-# %% [markdown]
+ 
 # ## Define the Model Architectures
-# 
-# For our VAE models, we use an encoder network and a decoder network, both of which have been pre-defined for ease of use in this assignment.
-# 
-# Encoder: It is a model that maps input images to the latent space, and in particular, to the parameters of the distribution in the latent space.
-# 
-# Decoder: It is a model that maps a sample in the latent space to a distribution in the observed space.
-
-# %%
 class Encoder(nn.Module):
   def __init__(self, nc, nef, nz, isize, device):
     super(Encoder, self).__init__()
@@ -211,19 +137,7 @@ class Decoder(nn.Module):
     output = self.decoder_conv(hidden)
     return output
 
-# %% [markdown]
-# # Diagonal Gaussian Distribution
-# 
-# The following class provides a way of setting up the diagonal gaussian distribution, which is parameterized by a mean vector, and a logvar vector of the same shape as the mean vector. The logvar vector denotes the log of the variances on the diagonals of a diagonal covariance matrix.
-# 
-# The task is to implement the following functions:
-# 
-# - Sampling: Provide the methodology of computing a **reparamterized** sample from the given distribution.
-# - KL Divergence: Compute and return the KL divergence of the distribution with the standard normal, that is, $\mathbb{KL}[\mathcal{N}(\mu, \Sigma) || \mathcal{N}(0, I)]$ where $\Sigma$ is a diagonal covariance matrix.
-# - Negative Log Likelihood: Given some data $x$, returns the log likelihood under the current gaussian, that is, $\log \mathcal{N}(x | \mu, \Sigma)$
-# - Mode: Returns the mode of the distribution 
-
-# %%
+ 
 class DiagonalGaussianDistribution(object):
   # Gaussian Distribution with diagonal covariance matrix
   def __init__(self, mean, logvar=None):
@@ -275,20 +189,7 @@ class DiagonalGaussianDistribution(object):
     mode = self.mean     # WRITE CODE HERE
     return mode
 
-# %% [markdown]
-# # VAE Model
-# 
-# The Variational Autoencoder (VAE) model consists of an encoder network that parameterizes the distribution $q_\phi$ as a Diagonal Gaussian Distribution through the (mean, log variance) parameterization and a decoder network that parameterizes the distribution $p_\theta$ as another Diagonal Gaussian Distribution with an identity covariance matrix.
-# 
-# The task is to implement the following
-# 
-# - Encode: The function that takes as input a batched data sample, and returns the approximate posterior distribution $q_\phi$
-# - Decode: The function that takes as input a batched sample from the latent space, and returns the mode of the distribution $p_\theta$
-# - Sample: Generates a novel sample by sampling from the prior and then using the mode of the distribution $p_\theta$
-# - Forward: The main function for training. Given a data sample x, encode it using the encode function, and then obtain a reparameterized sample from it, and finally decode it. Return the mode from the decoded distribution $p_\theta$, as well as the conditional likelihood and KL terms of the loss. Note that the loss terms should be of size (batch size,) as the averaging is taken care of in the training loop
-# - Log Likelihood: The main function for testing that approximates the log-likelihood of the given data. It is computed using importance sampling as $\log \frac{1}{K} \sum\limits_{k=1}^K \frac{p_\theta(x, z_k)}{q_\phi(z_k|x)}$ where $z_k \sim q_\phi(z | x)$. Please compute this quantity using the log-sum-exp trick for more stable computations; you can use PyTorch's logsumexp() function.
-
-# %%
+ 
 class VAE(nn.Module):
   def __init__(self, in_channels=3, decoder_features=32, encoder_features=32, z_dim=100, input_size=32, device=torch.device("cuda:0")):
     super(VAE, self).__init__()
@@ -391,11 +292,35 @@ class VAE(nn.Module):
 
     return recon.mode(), recon.nll(x), posterior.kl()
 
-# %% [markdown]
-# Here we define the model as well as the optimizer to take care of training.
+ 
+def interpolate(model, z_1, z_2, n_samples):
+  # Interpolate between z_1 and z_2 with n_samples number of points, with the first point being z_1 and last being z_2.
+  # Inputs:
+  #   z_1: The first point in the latent space
+  #   z_2: The second point in the latent space
+  #   n_samples: Number of points interpolated
+  # Returns:
+  #   sample: The mode of the distribution obtained by decoding each point in the latent space
+  #           Should be of size (n_samples, 3, 32, 32)
+  lengths = torch.linspace(0., 1., n_samples).unsqueeze(1).to(device)
+  z = z_2 + lengths * (z_1 - z_2)    # WRITE CODE HERE (interpolate z_1 to z_2 with n_samples points)
+  return model.decode(z).mode()
 
-# %%
+
 if __name__ == '__main__':
+  results_folder = Path("./results")
+  results_folder.mkdir(exist_ok = True)
+
+  # Training Hyperparameters
+  train_batch_size = 64   # Batch Size
+  z_dim = 32        # Latent Dimensionality
+  lr = 1e-4         # Learning Rate
+
+  # Define Dataset Statistics
+  image_size = 32
+  input_channels = 3
+  data_root = '../data'
+
   model = VAE(in_channels=input_channels, 
             input_size=image_size, 
             z_dim=z_dim, 
@@ -405,15 +330,7 @@ if __name__ == '__main__':
             )
   model.to(device)
   optimizer = Adam(model.parameters(), lr=lr)
-
-# %% [markdown]
-# Finally, let's start training!
-# Visualization of the samples generated, the original dataset and the reconstructions are saved locally in the notebook!
-
-# %%
-epochs = 30
-
-if __name__ == '__main__':
+  epochs = 30
   train_dataloader, _ = get_dataloaders(data_root, batch_size=train_batch_size)
   for epoch in range(epochs):
     with tqdm(train_dataloader, unit="batch", leave=False) as tepoch:
@@ -441,12 +358,8 @@ if __name__ == '__main__':
     save_image((samples + 1.) * 0.5, f'./results/samples_{epoch}.png')
 
   show_image(((samples + 1.) * 0.5).clamp(0., 1.))
-
-# %% [markdown]
-# Once the training of the model is done, we can use the model to approximate the log-likelihood of the test data using the function that we defined above.
-
-# %%
-if __name__ == '__main__':
+  
+  # Once the training of the model is done, we can use the model to approximate the log-likelihood of the test data using the function that we defined above.
   _, test_dataloader = get_dataloaders(data_root, batch_size=train_batch_size)
   with torch.no_grad():
     with tqdm(test_dataloader, unit="batch", leave=True) as tepoch:
@@ -463,24 +376,6 @@ if __name__ == '__main__':
         num_samples += batch_size
         tepoch.set_postfix(log_likelihood=log_likelihood / num_samples)
 
-# %% [markdown]
-# Finally, we also visualize the interpolation between two points in the latent space: $z_1$ and $z_2$ by choosing points at equal intervals on the line from the two points.
-
-# %%
-def interpolate(model, z_1, z_2, n_samples):
-  # Interpolate between z_1 and z_2 with n_samples number of points, with the first point being z_1 and last being z_2.
-  # Inputs:
-  #   z_1: The first point in the latent space
-  #   z_2: The second point in the latent space
-  #   n_samples: Number of points interpolated
-  # Returns:
-  #   sample: The mode of the distribution obtained by decoding each point in the latent space
-  #           Should be of size (n_samples, 3, 32, 32)
-  lengths = torch.linspace(0., 1., n_samples).unsqueeze(1).to(device)
-  z = z_2 + lengths * (z_1 - z_2)    # WRITE CODE HERE (interpolate z_1 to z_2 with n_samples points)
-  return model.decode(z).mode()
-
-if __name__ == '__main__':
   z_1 = torch.randn(1, z_dim).to(device)
   z_2 = torch.randn(1, z_dim).to(device)
 
