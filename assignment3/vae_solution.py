@@ -2,7 +2,6 @@ import random
 import numpy as np
 import traceback
 from tqdm.auto import tqdm
-import wandb
 import torch
 import math
 torch.pi = math.pi
@@ -29,6 +28,19 @@ def fix_experiment_seed(seed=0):
 
 fix_experiment_seed()
 device = "cuda" if torch.cuda.is_available() else "cpu"
+results_folder = Path("./results")
+results_folder.mkdir(exist_ok = True)
+
+# Training Hyperparameters
+train_batch_size = 64   # Batch Size
+z_dim = 32        # Latent Dimensionality
+lr = 1e-4         # Learning Rate
+
+# Define Dataset Statistics
+image_size = 32
+input_channels = 3
+data_root = '../data'
+
 print ("Device: ", device)
 
 # Helper Functions
@@ -310,19 +322,8 @@ def interpolate(model, z_1, z_2, n_samples):
 
 
 if __name__ == '__main__':
-  results_folder = Path("./results")
-  results_folder.mkdir(exist_ok = True)
-
-  # Training Hyperparameters
-  train_batch_size = 64   # Batch Size
-  z_dim = 32        # Latent Dimensionality
-  lr = 1e-4         # Learning Rate
-
-  # Define Dataset Statistics
-  image_size = 32
-  input_channels = 3
-  data_root = '../data'
-  epochs = 30
+  import wandb
+  epochs = 150
   exp_args = {"train_batch_size":train_batch_size,"z_dim":z_dim,"lr":lr,"image_size":image_size,"input_channels":input_channels,"data_root": data_root, "epochs": epochs, "device": str(device), "model": "VAE"}
   wandb.init(project="RepLearning - A3",config=exp_args)
   model = VAE(in_channels=input_channels, 
@@ -334,11 +335,16 @@ if __name__ == '__main__':
             )
   model.to(device)
   optimizer = Adam(model.parameters(), lr=lr)
-  train_dataloader, _ = get_dataloaders(data_root, batch_size=train_batch_size)
+  train_dataloader, test_dataloader = get_dataloaders(data_root, batch_size=train_batch_size)
+  import time
   for epoch in range(epochs):
+    
+    train_start_time = time.time()
     with tqdm(train_dataloader, unit="batch", leave=False) as tepoch:
       model.train()
+      net_loss, net_nll, net_kl = 0., 0., 0.
       print("Epoch: ", epoch)
+      
       for batch in tepoch:
         tepoch.set_description(f"Epoch: {epoch}")
 
@@ -353,36 +359,50 @@ if __name__ == '__main__':
 
         loss.backward()
         optimizer.step()
-        wandb.log({"loss":loss.item(), "nll":nll.mean().item(), "kl":kl.mean().item()})
+        net_loss, net_nll, net_kl = net_loss + loss.item(), net_nll + nll.mean().item(), net_kl + kl.mean().item()
         tepoch.set_postfix(loss=loss.item())
-
-    samples = model.sample(batch_size=64)
-    save_image((x + 1.) * 0.5, './results/orig.png')
-    save_image((recon + 1.) * 0.5, './results/recon.png')
-    save_image((samples + 1.) * 0.5, f'./results/samples_{epoch}.png')
-
-  show_image(((samples + 1.) * 0.5).clamp(0., 1.))
-  
-  # Once the training of the model is done, we can use the model to approximate the log-likelihood of the test data using the function that we defined above.
-  _, test_dataloader = get_dataloaders(data_root, batch_size=train_batch_size)
-  with torch.no_grad():
-    with tqdm(test_dataloader, unit="batch", leave=True) as tepoch:
+    train_end_time = time.time()
+    
+    with tqdm(test_dataloader, unit="batch", leave=False) as tepoch:
       model.eval()
-      log_likelihood = 0.
-      num_samples = 0.
+      net_test_loss, net_test_nll, net_test_kl = 0., 0., 0.
       for batch in tepoch:
         tepoch.set_description(f"Epoch: {epoch}")
-        imgs,_ = batch
+
+        optimizer.zero_grad()
+
+        imgs, _ = batch
         batch_size = imgs.shape[0]
-        x = imgs.to(device)
+        test_x = imgs.to(device)
 
-        log_likelihood += model.log_likelihood(x).sum()
-        num_samples += batch_size
-        tepoch.set_postfix(log_likelihood=log_likelihood / num_samples)
+        test_recon, test_nll, test_kl = model(test_x)
+        test_loss = (test_nll + test_kl).mean()
+        net_test_loss, net_test_nll, net_test_kl = net_test_loss + test_loss.item(), net_test_nll + test_nll.mean().item(), net_test_kl + test_kl.mean().item()
+        # wandb.log({"test_loss":test_loss.item(), "test_nll":test_nll.mean().item(), "test_kl":test_kl.mean().item()})
+        tepoch.set_postfix(loss=test_loss.item())
+        
+    wandb.log({"train_time": train_end_time - train_start_time, 
+               "loss": net_loss, "nll": net_nll, "kl": net_kl, 
+               "test_loss":net_test_loss, "test_nll":net_test_nll, "test_kl":net_test_kl})
 
+    samples = model.sample(batch_size=64)
+    if((epoch+1)%5==0):
+      save_image((test_x + 1.) * 0.5, f'./results_vae_150/test_orig_{epoch}.png')
+      save_image((test_recon + 1.) * 0.5, f'./results_vae_150/test_recon_{epoch}.png')
+
+      save_image((x + 1.) * 0.5, f'./results_vae_150/orig_{epoch}.png')
+      save_image((recon + 1.) * 0.5, f'./results_vae_150/recon_{epoch}.png')
+      save_image((samples + 1.) * 0.5, f'./results_vae_150/samples_{epoch}.png')
+
+  # show_image(((samples + 1.) * 0.5).clamp(0., 1.))
+  
+  # Once the training of the model is done, we can use the model to approximate the log-likelihood of the test data using the function that we defined above.
   z_1 = torch.randn(1, z_dim).to(device)
   z_2 = torch.randn(1, z_dim).to(device)
 
   interp = interpolate(model, z_1, z_2, 10)
+  save_image((interp + 1.) * 0.5, f'./results_vae_150/interp_p2.png')
   show_image((interp + 1.) * 0.5, nrow=10)
   wandb.finish()
+  
+  # scp vishal.gupta@mila:/home/mila/v/vishal.gupta/IFT6135_H2023_Programming/assignment3/results_vae/interp_p2.png /Users/vishalgupta/Downloads/results_vae 2/interp_p2.png

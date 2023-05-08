@@ -20,7 +20,7 @@ from torchvision import datasets
 from torchvision.utils import make_grid, save_image
 from torchvision import transforms
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from pathlib import Path
 
 
@@ -37,9 +37,10 @@ def fix_experiment_seed(seed=0):
 def show_image(image, nrow=8):
   # Input: image
   # Displays the image using matplotlib
-  grid_img = make_grid(image.detach().cpu(), nrow=nrow, padding=0)
-  plt.imshow(grid_img.permute(1, 2, 0))
-  plt.axis('off')
+  # grid_img = make_grid(image.detach().cpu(), nrow=nrow, padding=0)
+  # plt.imshow(grid_img.permute(1, 2, 0))
+  # plt.axis('off')
+  pass
 
 def linear_beta_schedule(beta_start, beta_end, timesteps):
   return torch.linspace(beta_start, beta_end, timesteps)
@@ -48,6 +49,19 @@ def linear_beta_schedule(beta_start, beta_end, timesteps):
 fix_experiment_seed()
 
 # Hyperparameters taken from Ho et. al for noise scheduling
+results_folder = Path("./results_ddpm_150")
+results_folder.mkdir(exist_ok = True)
+
+
+# Training Hyperparameters
+train_batch_size = 64   # Batch Size
+lr = 1e-4         # Learning Rate
+
+# Define Dataset Statistics
+image_size = 32
+input_channels = 3
+data_root = '../data'
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 T = 1000            # Diffusion Timesteps
 beta_start = 0.0001 # Starting variance
@@ -57,7 +71,7 @@ betas = linear_beta_schedule(beta_start, beta_end, T)           # WRITE CODE HER
 alphas = 1-betas                            # WRITE CODE HERE: Compute the alphas as 1 - betas
 sqrt_recip_alphas = 1/torch.sqrt(alphas)                 # WRITE CODE HERE: Returns 1/square_root(\alpha_t)
 alphas_cumprod = torch.cumprod(alphas,dim=0)                    # WRITE CODE HERE: Compute product of alphas up to index t, \bar{\alpha}
-sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)               # WRITE CODE HERE: Returns sqaure_root(\bar{\alpha}_t)
+sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod).to(device)               # WRITE CODE HERE: Returns sqaure_root(\bar{\alpha}_t)
 sqrt_one_minus_alphas_cumprod = torch.sqrt(1-alphas_cumprod)     # WRITE CODE HERE: Returns square_root(1 - \bar{\alpha}_t)
 alphas_cumprod_prev = alphas_cumprod.roll(1,0)               # WRITE CODE HERE: Right shifts \bar{\alpha}_t; with first element as 1.
 alphas_cumprod_prev[0] = 1
@@ -323,9 +337,9 @@ class Unet(nn.Module):
     # Returns:
     #   noise_pred: noise prediction made from the model, size (batch_size, 3, 32, 32)
 
-    x = self.init_conv(x)
+    x = self.init_conv(x.to(device))
 
-    t = self.time_mlp(time) if exists(self.time_mlp) else None
+    t = self.time_mlp(time.to(device)).to(device) if exists(self.time_mlp) else None
 
     h = []
 
@@ -391,7 +405,7 @@ def q_sample(x_start, t, noise=None):
     noise = torch.randn_like(x_start)
 
   sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t]           # WRITE CODE HERE: Obtain the cumulative product sqrt_alphas_cumprod up to a given point t in a batched manner for different t's
-  sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t] # WRITE CODE HERE: Same as above, but for sqrt_one_minus_alphas_cumprod
+  sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t].to(device) # WRITE CODE HERE: Same as above, but for sqrt_one_minus_alphas_cumprod
   x_noisy = sqrt_alphas_cumprod_t.reshape(-1,1,1,1) * x_start + noise * sqrt_one_minus_alphas_cumprod_t.reshape(-1,1,1,1)
   return x_noisy
 
@@ -472,12 +486,14 @@ def p_losses(denoise_model, x_start, t):
       t: Timesteps (can be different at different indices); size (batch_size,)
     Returns:
       loss: Loss for training the model"""
-  noise = torch.randn_like(x_start)
+  noise = torch.randn_like(x_start).to(device)
+  # _term1 = extract(sqrt_alphas_cumprod, t, x_start.shape).to(device) * x_start
+  # _term2 = extract(sqrt_one_minus_alphas_cumprod, t, noise.shape).to(device) * noise
+  # x_noisy = _term1 + _term2         # WRITE CODE HERE: Obtain the noisy image from the original images x_start, at times t, using the noise noise.
+  x_noisy = q_sample(x_start, t, noise)
+  predicted_noise = denoise_model(x_noisy, t).to(device) # WRITE CODE HERE: Obtain the prediction of the noise using the model.
 
-  x_noisy = extract(sqrt_alphas_cumprod, t, x_start.shape) * x_start + extract(sqrt_one_minus_alphas_cumprod, t, noise.shape) * noise        # WRITE CODE HERE: Obtain the noisy image from the original images x_start, at times t, using the noise noise.
-  predicted_noise = denoise_model(x_noisy, t) # WRITE CODE HERE: Obtain the prediction of the noise using the model.
-
-  loss = F.huber_loss(predicted_noise, noise, reduction='mean', delta=1.0)           # WRITE CODE HERE: Compute the huber loss between true noise generated above, and the noise estimate obtained through the model.
+  loss = F.huber_loss(predicted_noise, noise, reduction='mean', delta=1.0).to(device)       # WRITE CODE HERE: Compute the huber loss between true noise generated above, and the noise estimate obtained through the model.
 
   return loss
  
@@ -498,20 +514,11 @@ def t_sample(timesteps, batch_size):
 
 
 if __name__ == '__main__':
-  epochs = 30
-  results_folder = Path("./results")
-  results_folder.mkdir(exist_ok = True)
-  
-
-  # Training Hyperparameters
-  train_batch_size = 64   # Batch Size
-  lr = 1e-4         # Learning Rate
-
-  # Define Dataset Statistics
-  image_size = 32
-  input_channels = 3
-  data_root = '../data'
-  
+  import wandb
+  train_dataloader, _ = get_dataloaders(data_root, batch_size=train_batch_size)
+  epochs = 150
+  exp_args = {"epochs": epochs, "lr": 1e-3, "train_batch_size": 64, "image_size": 32, "input_channels": 3, 'model':"ddpm"}
+  wandb.init(project="RepLearning - A3",config=exp_args)
   model = Unet(
     dim=image_size,
     channels=input_channels,
@@ -521,11 +528,11 @@ if __name__ == '__main__':
   model.to(device)
 
   optimizer = Adam(model.parameters(), lr=lr)
-
-
-  train_dataloader, _ = get_dataloaders(data_root, batch_size=train_batch_size)
+  import time
   for epoch in range(epochs):
+    start_time = time.time()
     with tqdm(train_dataloader, unit="batch", leave=False) as tepoch:
+      net_loss = 0
       for batch in tepoch:
         tepoch.set_description(f"Epoch: {epoch}")
 
@@ -540,15 +547,29 @@ if __name__ == '__main__':
 
         loss.backward()
         optimizer.step()
-        
+        net_loss += loss.item()
         tepoch.set_postfix(loss=loss.item())
-
+    wandb.log({"loss":net_loss, "train_time": time.time() - start_time})
     # Sample and Save Generated Images
-    save_image((x + 1.) * 0.5, './results/orig.png')
+    save_image((x + 1.) * 0.5, f'./results_ddpm_150/orig_{epoch}.png')
     samples = sample(model, image_size=image_size, batch_size=64, channels=input_channels)
     samples = (torch.Tensor(samples[-1]) + 1.) * 0.5
-    save_image(samples, f'./results/samples_{epoch}.png')
-  
-  show_image(samples)
+    save_image(samples, f'./results_ddpm_150/samples_{epoch}.png')
 
+  _, test_dataloader = get_dataloaders(data_root, batch_size=train_batch_size)
+  for batch in test_dataloader:
+    imgs,_ = batch
+    batch_size = imgs.shape[0]
+    x = imgs.to(device)
+    break
 
+  recon_dump, x_noisy_dump = [], []
+  for t in range(1, T, 5):
+    x_noisy = q_sample(x_start=x, t=torch.tensor([t]))
+    print ("Trying to denoise from timestep", t)
+    img = x_noisy.to(device)
+    for i in tqdm(reversed(range(0, t)), desc='Recon', total=t, leave=False):
+      t_ = torch.tensor([i], dtype=torch.long, device=device).expand(batch_size)
+      img = p_sample(model=model, x=img, t=t_, t_index=i)
+    save_image((x_noisy + 1.) * 0.5 , f'./results_ddpm_150/x_noised_{int(t)}.png')
+    save_image((img + 1.) * 0.5     , f'./results_ddpm_150/x_recon_{int(t)}.png')
